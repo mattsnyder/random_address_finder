@@ -16,7 +16,10 @@ defmodule RandomAddressFinder.AddressFinder do
       iex> AddressFinder.find_random_address("94102")
       {:ok, %{street: "456 Oak Ave", city: "San Francisco", state: "CA", zip: "94102"}}
   """
-  def find_random_address(location) when is_binary(location) do
+  def find_random_address(location, client \\ nil)
+  
+  def find_random_address(location, client) when is_binary(location) do
+    client = client || get_google_maps_client()
     location = String.trim(location)
     
     cond do
@@ -27,9 +30,9 @@ defmodule RandomAddressFinder.AddressFinder do
         {:error, "Location must be at least 2 characters"}
         
       true ->
-        with {:ok, coordinates} <- GoogleMapsClient.geocode_location(location),
-             {:ok, places} <- GoogleMapsClient.find_nearby_places(coordinates.lat, coordinates.lng),
-             {:ok, address} <- select_random_address(places) do
+        with {:ok, coordinates} <- client.geocode_location(location),
+             {:ok, places} <- client.find_nearby_places(coordinates.lat, coordinates.lng),
+             {:ok, address} <- select_random_address(places, client) do
           {:ok, address}
         else
           {:error, "Location not found"} -> {:error, "Location not found"}
@@ -38,18 +41,18 @@ defmodule RandomAddressFinder.AddressFinder do
     end
   end
   
-  def find_random_address(_), do: {:error, "Invalid location format"}
+  def find_random_address(_, _), do: {:error, "Invalid location format"}
 
-  defp select_random_address([]), do: {:error, "No addresses found"}
+  defp select_random_address([], _client), do: {:error, "No addresses found"}
   
-  defp select_random_address(places) do
+  defp select_random_address(places, client) do
     random_place = Enum.random(places)
     
     address = %{
       street: extract_street_address(random_place),
       city: extract_city(random_place),
       state: extract_state(random_place),
-      zip: extract_zip(random_place)
+      zip: extract_zip(random_place, client)
     }
     
     {:ok, address}
@@ -89,7 +92,7 @@ defmodule RandomAddressFinder.AddressFinder do
     end
   end
 
-  defp extract_zip(place) do
+  defp extract_zip(place, client) do
     case Map.get(place, :zip) do
       nil -> 
         # Try to get zip code via reverse geocoding with the actual address
@@ -97,7 +100,7 @@ defmodule RandomAddressFinder.AddressFinder do
         city = extract_city(place)
         state = extract_state(place)
         
-        case GoogleMapsClient.reverse_geocode_for_zip(street_address, city, state) do
+        case client.reverse_geocode_for_zip(street_address, city, state) do
           {:ok, zip} -> zip
           {:error, _} -> generate_realistic_zip(place)
         end
@@ -144,5 +147,9 @@ defmodule RandomAddressFinder.AddressFinder do
       {_, "FL"} -> Enum.random(["33101", "32801", "33301", "34601"])
       _ -> Enum.random(["12345", "23456", "34567", "45678", "56789"])
     end
+  end
+
+  defp get_google_maps_client do
+    Application.get_env(:random_address_finder, :google_maps_client, GoogleMapsClient)
   end
 end
